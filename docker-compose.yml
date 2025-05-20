@@ -1,0 +1,19 @@
+version: '3'
+
+services:
+  yaml-helm-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - REPO_OWNER=${REPO_OWNER}
+      - REPO_NAME=${REPO_NAME}
+      - PORT=8080
+      - GIN_MODE=release
+    volumes:
+      # Mount .kube directory for Helm to access Kubernetes config if needed
+      - ${HOME}/.kube:/root/.kube:ro
+    restart: unless-stopped
