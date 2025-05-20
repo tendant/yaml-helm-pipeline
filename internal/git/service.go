@@ -1,0 +1,107 @@
+package git
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport/http"
+)
+
+// Service handles Git operations
+type Service struct {
+	token string
+}
+
+// NewService creates a new Git service
+func NewService(token string) *Service {
+	return &Service{
+		token: token,
+	}
+}
+
+// CloneRepository clones a repository to a local directory
+func (s *Service) CloneRepository(url, directory, branch string) error {
+	// Remove directory if it exists
+	if _, err := os.Stat(directory); err == nil {
+		if err := os.RemoveAll(directory); err != nil {
+			return fmt.Errorf("failed to remove existing directory: %w", err)
+		}
+	}
+
+	// Create directory
+	if err := os.MkdirAll(directory, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Clone the repository
+	_, err := git.PlainClone(directory, false, &git.CloneOptions{
+		URL:           url,
+		Progress:      os.Stdout,
+		ReferenceName: plumbing.ReferenceName(fmt.Sprintf("refs/heads/%s", branch)),
+		SingleBranch:  true,
+		Auth: &http.BasicAuth{
+			Username: "git", // This can be anything except an empty string
+			Password: s.token,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to clone repository: %w", err)
+	}
+
+	return nil
+}
+
+// CommitAndPush commits changes to a repository and pushes them
+func (s *Service) CommitAndPush(repoPath, message string) error {
+	// Open the repository
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	// Get the worktree
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	// Add all changes
+	if err := worktree.AddGlob("."); err != nil {
+		return fmt.Errorf("failed to add changes: %w", err)
+	}
+
+	// Commit changes
+	_, err = worktree.Commit(message, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Helm Pipeline",
+			Email: "helm-pipeline@example.com",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to commit changes: %w", err)
+	}
+
+	// Push changes
+	err = repo.Push(&git.PushOptions{
+		Auth: &http.BasicAuth{
+			Username: "git", // This can be anything except an empty string
+			Password: s.token,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to push changes: %w", err)
+	}
+
+	return nil
+}
+
+// GetLocalRepoPath returns the path to the local repository
+func (s *Service) GetLocalRepoPath(owner, repo, branch string) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("%s-%s-%s", owner, repo, branch))
+}
