@@ -2,9 +2,14 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/lei/yaml-helm-pipeline/internal/api"
 	"github.com/lei/yaml-helm-pipeline/internal/git"
 	"github.com/lei/yaml-helm-pipeline/internal/github"
@@ -34,22 +39,35 @@ func main() {
 	gitService := git.NewService(githubToken)
 
 	// Initialize router
-	router := gin.Default()
+	router := chi.NewRouter()
+
+	// Setup middleware
+	router.Use(middleware.RequestID)
+	router.Use(middleware.RealIP)
+	router.Use(middleware.Logger)
+	router.Use(middleware.Recoverer)
+	router.Use(middleware.Timeout(60 * time.Second))
 
 	// Setup CORS
-	router.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-		c.Next()
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
 	})
 
 	// Serve static files for frontend
-	router.Static("/", "./frontend/dist")
+	workDir, _ := os.Getwd()
+	filesDir := http.Dir(filepath.Join(workDir, "frontend/dist"))
+	FileServer(router, "/", filesDir)
 
 	// Setup API routes
 	api.SetupRoutes(router, githubService, helmService, gitService)
@@ -62,7 +80,24 @@ func main() {
 
 	// Start server
 	log.Printf("Server starting on port %s...", port)
-	if err := router.Run(":" + port); err != nil {
+	if err := http.ListenAndServe(":"+port, router); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
+	}
+}
+
+// FileServer conveniently sets up a http.FileServer handler to serve
+// static files from a http.FileSystem.
+func FileServer(r chi.Router, path string, root http.FileSystem) {
+	if strings.HasSuffix(path, "/") {
+		r.Get(path+"*", func(w http.ResponseWriter, r *http.Request) {
+			rctx := chi.RouteContext(r.Context())
+			pathPrefix := strings.TrimSuffix(rctx.RoutePattern(), "/*")
+			fs := http.StripPrefix(pathPrefix, http.FileServer(root))
+			fs.ServeHTTP(w, r)
+		})
+	} else {
+		r.Get(path, func(w http.ResponseWriter, r *http.Request) {
+			http.FileServer(root).ServeHTTP(w, r)
+		})
 	}
 }

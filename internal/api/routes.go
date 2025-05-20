@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 
-	"github.com/gin-gonic/gin"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/render"
 	"github.com/lei/yaml-helm-pipeline/internal/extractor"
 	"github.com/lei/yaml-helm-pipeline/internal/git"
 	"github.com/lei/yaml-helm-pipeline/internal/github"
@@ -33,25 +35,24 @@ func NewHandler(githubService *github.Service, helmService *helm.Service, gitSer
 }
 
 // SetupRoutes sets up the API routes
-func SetupRoutes(router *gin.Engine, githubService *github.Service, helmService *helm.Service, gitService *git.Service) {
+func SetupRoutes(router chi.Router, githubService *github.Service, helmService *helm.Service, gitService *git.Service) {
 	extractorService := extractor.NewService()
 
 	handler := NewHandler(githubService, helmService, gitService, extractorService)
 
-	api := router.Group("/api")
-	{
-		api.GET("/branches", handler.ListBranches)
-		api.POST("/preview", handler.PreviewChanges)
-		api.POST("/commit", handler.CommitChanges)
-		api.GET("/health", handler.HealthCheck)
-	}
+	router.Route("/api", func(r chi.Router) {
+		r.Get("/branches", handler.ListBranches)
+		r.Post("/preview", handler.PreviewChanges)
+		r.Post("/commit", handler.CommitChanges)
+		r.Get("/health", handler.HealthCheck)
+	})
 }
 
 // ListBranches lists the branches in the repository
-func (h *Handler) ListBranches(c *gin.Context) {
+func (h *Handler) ListBranches(w http.ResponseWriter, r *http.Request) {
 	branches, err := h.githubService.ListBranches(context.Background())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -60,26 +61,33 @@ func (h *Handler) ListBranches(c *gin.Context) {
 		branchNames = append(branchNames, *branch.Name)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"branches": branchNames})
+	render.JSON(w, r, map[string]interface{}{
+		"branches": branchNames,
+	})
 }
 
 // PreviewRequest represents a request to preview changes
 type PreviewRequest struct {
-	Branch string `json:"branch" binding:"required"`
+	Branch string `json:"branch"`
 }
 
 // PreviewChanges previews the changes that will be made
-func (h *Handler) PreviewChanges(c *gin.Context) {
+func (h *Handler) PreviewChanges(w http.ResponseWriter, r *http.Request) {
 	var req PreviewRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Branch == "" {
+		http.Error(w, "Branch is required", http.StatusBadRequest)
 		return
 	}
 
 	// Get repository information
 	repo, err := h.githubService.GetRepository(context.Background())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get repository information: " + err.Error()})
+		http.Error(w, "Failed to get repository information: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -91,7 +99,7 @@ func (h *Handler) PreviewChanges(c *gin.Context) {
 	localRepoPath := h.gitService.GetLocalRepoPath(repoOwner, repoName, req.Branch)
 
 	if err := h.gitService.CloneRepository(repoURL, localRepoPath, req.Branch); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clone repository: " + err.Error()})
+		http.Error(w, "Failed to clone repository: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -101,30 +109,30 @@ func (h *Handler) PreviewChanges(c *gin.Context) {
 
 	// Check if the files exist
 	if _, err := os.Stat(chartPath); os.IsNotExist(err) {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Chart directory not found"})
+		http.Error(w, "Chart directory not found", http.StatusInternalServerError)
 		return
 	}
 
 	if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Values file not found"})
+		http.Error(w, "Values file not found", http.StatusInternalServerError)
 		return
 	}
 
 	// Generate the YAML using Helm
 	yamlOutput, err := h.helmService.TemplateChart(chartPath, valuesPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to template chart: " + err.Error()})
+		http.Error(w, "Failed to template chart: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Extract keys from the YAML
 	keys, err := h.extractorService.ExtractKeys(yamlOutput)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to extract keys: " + err.Error()})
+		http.Error(w, "Failed to extract keys: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	render.JSON(w, r, map[string]interface{}{
 		"keys":   keys,
 		"branch": req.Branch,
 	})
@@ -132,22 +140,32 @@ func (h *Handler) PreviewChanges(c *gin.Context) {
 
 // CommitRequest represents a request to commit changes
 type CommitRequest struct {
-	Branch  string `json:"branch" binding:"required"`
-	Message string `json:"message" binding:"required"`
+	Branch  string `json:"branch"`
+	Message string `json:"message"`
 }
 
 // CommitChanges commits the changes to the repository
-func (h *Handler) CommitChanges(c *gin.Context) {
+func (h *Handler) CommitChanges(w http.ResponseWriter, r *http.Request) {
 	var req CommitRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Branch == "" {
+		http.Error(w, "Branch is required", http.StatusBadRequest)
+		return
+	}
+
+	if req.Message == "" {
+		http.Error(w, "Message is required", http.StatusBadRequest)
 		return
 	}
 
 	// Get repository information
 	repo, err := h.githubService.GetRepository(context.Background())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get repository information: " + err.Error()})
+		http.Error(w, "Failed to get repository information: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -159,7 +177,7 @@ func (h *Handler) CommitChanges(c *gin.Context) {
 	localRepoPath := h.gitService.GetLocalRepoPath(repoOwner, repoName, req.Branch)
 
 	if err := h.gitService.CloneRepository(repoURL, localRepoPath, req.Branch); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clone repository: " + err.Error()})
+		http.Error(w, "Failed to clone repository: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -169,36 +187,36 @@ func (h *Handler) CommitChanges(c *gin.Context) {
 
 	// Check if the files exist
 	if _, err := os.Stat(chartPath); os.IsNotExist(err) {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Chart directory not found"})
+		http.Error(w, "Chart directory not found", http.StatusInternalServerError)
 		return
 	}
 
 	if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Values file not found"})
+		http.Error(w, "Values file not found", http.StatusInternalServerError)
 		return
 	}
 
 	// Generate the YAML using Helm
 	yamlOutput, err := h.helmService.TemplateChart(chartPath, valuesPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to template chart: " + err.Error()})
+		http.Error(w, "Failed to template chart: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Write the YAML to a file
 	outputPath := filepath.Join(localRepoPath, "generated-secrets.yaml")
 	if err := os.WriteFile(outputPath, yamlOutput, 0644); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write YAML file: " + err.Error()})
+		http.Error(w, "Failed to write YAML file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Commit and push the changes
 	if err := h.gitService.CommitAndPush(localRepoPath, req.Message); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit and push changes: " + err.Error()})
+		http.Error(w, "Failed to commit and push changes: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	render.JSON(w, r, map[string]interface{}{
 		"success": true,
 		"message": "Changes committed and pushed successfully",
 		"branch":  req.Branch,
@@ -206,7 +224,7 @@ func (h *Handler) CommitChanges(c *gin.Context) {
 }
 
 // HealthCheck checks the health of the API
-func (h *Handler) HealthCheck(c *gin.Context) {
+func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	// Check GitHub authentication
 	isAuthenticated := h.githubService.IsAuthenticated(context.Background())
 
@@ -218,7 +236,7 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 		helmInstalled = false
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	render.JSON(w, r, map[string]interface{}{
 		"status":               "ok",
 		"github_authenticated": isAuthenticated,
 		"helm_installed":       helmInstalled,

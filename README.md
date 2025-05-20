@@ -5,7 +5,7 @@ A web application that allows users to trigger Helm-based Kubernetes secret gene
 ## Features
 
 - SolidJS frontend with a clean, responsive UI
-- Golang backend API service
+- Golang backend API service with Chi router
 - GitHub integration for repository access
 - Helm CLI integration for templating
 - Preview of keys (without values) before committing
@@ -21,7 +21,7 @@ The application consists of the following components:
    - Preview of keys that will be changed
    - Commit form with message input
 
-2. **Backend API (Golang)**
+2. **Backend API (Golang with Chi Router)**
    - GitHub integration for repository access
    - Helm templating for generating Kubernetes secrets
    - Git operations for committing changes
