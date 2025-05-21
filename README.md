@@ -56,6 +56,13 @@ The following environment variables are required:
 - `VALUE_FILES_PATHS` (optional): Comma-separated list of value files paths to use for Helm templating. Paths can be relative to the repository root or absolute. If not provided, the default path `values/values.yaml` will be used.
   - Example: `values/values.yaml,values/secrets.yaml,/absolute/path/to/values.yaml`
 
+### Output Configuration
+
+- `OUTPUT_REPO_URL` (optional): Git URL of the target repository for generated YAML files. If not provided, the source repository will be used.
+- `OUTPUT_REPO_BRANCH` (optional): Branch to use in the target repository. Default: "main"
+- `OUTPUT_DIR` (optional): Directory within the target repository to save files. If not provided, files will be saved at the repository root.
+- `OUTPUT_FILENAME` (optional): Filename for the generated YAML. Default: "generated.yaml"
+
 ## Development Setup
 
 ### Backend

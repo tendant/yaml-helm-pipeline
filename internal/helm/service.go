@@ -21,16 +21,78 @@ func NewService() *Service {
 }
 
 // TemplateChart renders a Helm chart with the given values
-func (s *Service) TemplateChart(chartPath string, valuesPaths []string) ([]byte, error) {
-	// Create a temporary directory for the output
-	tempDir, err := ioutil.TempDir("", "helm-template")
+func (s *Service) TemplateChart(templatesPath string, valuesPaths []string) ([]byte, error) {
+	// Create a temporary directory for the chart
+	chartDir, err := ioutil.TempDir("", "helm-chart")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+		return nil, fmt.Errorf("failed to create temp chart directory: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer os.RemoveAll(chartDir)
+
+	// Create a templates directory in the chart directory
+	chartTemplatesDir := filepath.Join(chartDir, "templates")
+	if err := os.Mkdir(chartTemplatesDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create templates directory: %w", err)
+	}
+
+	// Copy all template files to the chart templates directory
+	err = filepath.Walk(templatesPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		// Read the template file
+		content, err := ioutil.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read template file: %w", err)
+		}
+
+		// Get the relative path from the templates directory
+		relPath, err := filepath.Rel(templatesPath, path)
+		if err != nil {
+			return fmt.Errorf("failed to get relative path: %w", err)
+		}
+
+		// Write the template file to the chart templates directory
+		destPath := filepath.Join(chartTemplatesDir, relPath)
+		destDir := filepath.Dir(destPath)
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			return fmt.Errorf("failed to create destination directory: %w", err)
+		}
+		if err := ioutil.WriteFile(destPath, content, 0644); err != nil {
+			return fmt.Errorf("failed to write template file: %w", err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy template files: %w", err)
+	}
+
+	// Create a Chart.yaml file
+	chartYaml := []byte(`apiVersion: v2
+name: generated-chart
+description: A Helm chart generated from templates
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+`)
+	if err := ioutil.WriteFile(filepath.Join(chartDir, "Chart.yaml"), chartYaml, 0644); err != nil {
+		return nil, fmt.Errorf("failed to create Chart.yaml: %w", err)
+	}
+
+	// Create a temporary directory for the output
+	outputDir, err := ioutil.TempDir("", "helm-output")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp output directory: %w", err)
+	}
+	defer os.RemoveAll(outputDir)
 
 	// Build the helm template command
-	args := []string{"template", chartPath, "--output-dir", tempDir}
+	args := []string{"template", chartDir, "--output-dir", outputDir}
 
 	// Add each values file
 	for _, valuesPath := range valuesPaths {
@@ -52,7 +114,8 @@ func (s *Service) TemplateChart(chartPath string, valuesPaths []string) ([]byte,
 
 	// Read all generated files and combine them
 	var combinedOutput bytes.Buffer
-	err = filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+	isFirstFile := true
+	err = filepath.Walk(outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -64,7 +127,19 @@ func (s *Service) TemplateChart(chartPath string, valuesPaths []string) ([]byte,
 			if err != nil {
 				return fmt.Errorf("failed to read generated file: %w", err)
 			}
-			combinedOutput.WriteString("---\n")
+
+			// Skip empty files
+			if len(bytes.TrimSpace(content)) == 0 {
+				return nil
+			}
+
+			// Only add separator if it's not the first file
+			if !isFirstFile {
+				combinedOutput.WriteString("---\n")
+			} else {
+				isFirstFile = false
+			}
+
 			combinedOutput.Write(content)
 			combinedOutput.WriteString("\n")
 		}
@@ -74,7 +149,11 @@ func (s *Service) TemplateChart(chartPath string, valuesPaths []string) ([]byte,
 		return nil, fmt.Errorf("failed to read generated files: %w", err)
 	}
 
-	return combinedOutput.Bytes(), nil
+	// Clean up the output to remove any duplicate separators
+	output := combinedOutput.Bytes()
+	output = bytes.ReplaceAll(output, []byte("---\n---\n"), []byte("---\n"))
+
+	return output, nil
 }
 
 // ExtractKeys extracts keys from YAML content without their values

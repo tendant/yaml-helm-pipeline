@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -251,15 +252,47 @@ func (h *Handler) CommitChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Write the YAML to a file
-	outputPath := filepath.Join(localRepoPath, "generated-secrets.yaml")
+	// Determine output repository and path
+	outputRepoPath, _, err := h.gitService.GetOutputRepoPath(localRepoPath)
+	if err != nil {
+		http.Error(w, "Failed to prepare output repository: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get output directory within the repository
+	outputDirEnv := os.Getenv("OUTPUT_DIR")
+	outputDir := outputRepoPath
+	if outputDirEnv != "" {
+		outputDir = filepath.Join(outputRepoPath, outputDirEnv)
+		// Create directory if it doesn't exist
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			http.Error(w, "Failed to create output directory: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Get output filename
+	outputFilename := os.Getenv("OUTPUT_FILENAME")
+	if outputFilename == "" {
+		outputFilename = "generated.yaml"
+	}
+
+	// Write the YAML to the output file
+	outputPath := filepath.Join(outputDir, outputFilename)
 	if err := os.WriteFile(outputPath, yamlOutput, 0644); err != nil {
 		http.Error(w, "Failed to write YAML file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Prepare commit message
+	commitMessage := req.Message
+	if os.Getenv("OUTPUT_REPO_URL") != "" {
+		commitMessage = fmt.Sprintf("%s (generated from %s/%s branch: %s)",
+			req.Message, *repo.Owner.Login, *repo.Name, req.Branch)
+	}
+
 	// Commit and push the changes
-	if err := h.gitService.CommitAndPush(localRepoPath, req.Message); err != nil {
+	if err := h.gitService.CommitAndPush(outputRepoPath, commitMessage); err != nil {
 		http.Error(w, "Failed to commit and push changes: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -288,11 +321,24 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	valueFilesConfig := os.Getenv("VALUE_FILES_PATHS")
 	valueFilesConfigured := valueFilesConfig != ""
 
+	// Check output configuration
+	outputRepoURL := os.Getenv("OUTPUT_REPO_URL")
+	outputRepoConfigured := outputRepoURL != ""
+	outputDir := os.Getenv("OUTPUT_DIR")
+	outputFilename := os.Getenv("OUTPUT_FILENAME")
+	if outputFilename == "" {
+		outputFilename = "generated.yaml"
+	}
+
 	render.JSON(w, r, map[string]interface{}{
 		"status":                 "ok",
 		"github_authenticated":   isAuthenticated,
 		"helm_installed":         helmInstalled,
 		"value_files_configured": valueFilesConfigured,
 		"value_files_paths":      valueFilesConfig,
+		"output_configured":      outputRepoConfigured,
+		"output_repo_url":        outputRepoURL,
+		"output_dir":             outputDir,
+		"output_filename":        outputFilename,
 	})
 }

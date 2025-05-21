@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -104,4 +105,46 @@ func (s *Service) CommitAndPush(repoPath, message string) error {
 // GetLocalRepoPath returns the path to the local repository
 func (s *Service) GetLocalRepoPath(owner, repo, branch string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("%s-%s-%s", owner, repo, branch))
+}
+
+// CloneOutputRepository clones the output repository if specified
+func (s *Service) CloneOutputRepository(outputRepoURL, outputBranch string) (string, error) {
+	if outputRepoURL == "" {
+		return "", fmt.Errorf("output repository URL is empty")
+	}
+
+	// Create a unique directory for the output repository
+	outputRepoPath := filepath.Join(os.TempDir(), fmt.Sprintf("output-repo-%s", time.Now().Format("20060102150405")))
+
+	// Clone the repository
+	err := s.CloneRepository(outputRepoURL, outputRepoPath, outputBranch)
+	if err != nil {
+		return "", fmt.Errorf("failed to clone output repository: %w", err)
+	}
+
+	return outputRepoPath, nil
+}
+
+// GetOutputRepoPath determines the path to use for output files
+func (s *Service) GetOutputRepoPath(sourceRepoPath string) (string, string, error) {
+	outputRepoURL := os.Getenv("OUTPUT_REPO_URL")
+	outputBranch := os.Getenv("OUTPUT_REPO_BRANCH")
+
+	// If no output repo specified, use the source repo
+	if outputRepoURL == "" || strings.TrimSpace(outputRepoURL) == "" {
+		return sourceRepoPath, "", nil
+	}
+
+	// Default to main branch if not specified
+	if outputBranch == "" {
+		outputBranch = "main"
+	}
+
+	// Clone the output repository
+	outputRepoPath, err := s.CloneOutputRepository(outputRepoURL, outputBranch)
+	if err != nil {
+		return "", "", err
+	}
+
+	return outputRepoPath, outputBranch, nil
 }
