@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -277,6 +278,15 @@ func (h *Handler) CommitChanges(w http.ResponseWriter, r *http.Request) {
 		outputFilename = "generated.yaml"
 	}
 
+	// Check if the file already exists and compare content
+	existingContent, err := os.ReadFile(filepath.Join(outputDir, outputFilename))
+	fileExists := err == nil
+	contentChanged := true
+
+	if fileExists {
+		contentChanged = !bytes.Equal(existingContent, yamlOutput)
+	}
+
 	// Write the YAML to the output file
 	outputPath := filepath.Join(outputDir, outputFilename)
 	if err := os.WriteFile(outputPath, yamlOutput, 0644); err != nil {
@@ -297,9 +307,15 @@ func (h *Handler) CommitChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Prepare response message
+	responseMessage := "Changes committed and pushed successfully"
+	if !contentChanged && fileExists {
+		responseMessage = "No changes detected. The generated content is identical to the existing file."
+	}
+
 	render.JSON(w, r, map[string]interface{}{
 		"success": true,
-		"message": "Changes committed and pushed successfully",
+		"message": responseMessage,
 		"branch":  req.Branch,
 	})
 }

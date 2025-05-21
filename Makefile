@@ -36,7 +36,7 @@ docker-build:
 
 # Run Docker container
 docker-run:
-	docker run -p 8080:8080 \
+	docker run -p 4000:4000 \
 		-e GITHUB_TOKEN=$(GITHUB_TOKEN) \
 		-e REPO_OWNER=$(REPO_OWNER) \
 		-e REPO_NAME=$(REPO_NAME) \

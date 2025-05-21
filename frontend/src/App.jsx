@@ -87,8 +87,8 @@ export function App() {
     try {
       setLoading(true);
       setError('');
-      await apiService.commitChanges(selectedBranch(), message);
-      setSuccess('Changes committed successfully!');
+      const response = await apiService.commitChanges(selectedBranch(), message);
+      setSuccess(response.message || 'Changes committed successfully!');
       setStep('success');
       setLoading(false);
     } catch (err) {
@@ -168,7 +168,7 @@ export function App() {
 
             <Show when={step() === 'success'}>
               <div class="mt-3">
-                <p>Your changes have been committed and pushed successfully.</p>
+                <p>{success()}</p>
                 
                 <OutputInfo 
                   dir={outputConfig().outputDir} 

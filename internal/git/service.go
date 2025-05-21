@@ -71,6 +71,18 @@ func (s *Service) CommitAndPush(repoPath, message string) error {
 		return fmt.Errorf("failed to get worktree: %w", err)
 	}
 
+	// Check repository status
+	status, err := worktree.Status()
+	if err != nil {
+		return fmt.Errorf("failed to get repository status: %w", err)
+	}
+
+	// If there are no changes, return early with no error
+	if status.IsClean() {
+		// No changes to commit, but this is not an error condition
+		return nil
+	}
+
 	// Add all changes
 	if err := worktree.AddGlob("."); err != nil {
 		return fmt.Errorf("failed to add changes: %w", err)
