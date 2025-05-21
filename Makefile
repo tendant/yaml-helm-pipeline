@@ -13,7 +13,7 @@ clean:
 	rm -rf bin/
 	rm -rf frontend/dist/
 
-docker-build:
+docker-push:
 	docker buildx build \
 		--platform linux/amd64,linux/arm64 \
 		--push \
