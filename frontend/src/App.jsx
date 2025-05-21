@@ -2,6 +2,7 @@ import { createSignal, createEffect, Show } from 'solid-js';
 import { BranchSelector } from './components/BranchSelector';
 import { KeyPreview } from './components/KeyPreview';
 import { CommitForm } from './components/CommitForm';
+import { OutputInfo } from './components/OutputInfo';
 import { apiService } from './services/apiService';
 
 export function App() {
@@ -12,6 +13,11 @@ export function App() {
   const [error, setError] = createSignal('');
   const [success, setSuccess] = createSignal('');
   const [step, setStep] = createSignal('select'); // select, preview, commit, success
+  const [outputConfig, setOutputConfig] = createSignal({
+    outputDir: '/',
+    outputFilename: 'generated.yaml',
+    outputRepoUrl: ''
+  });
 
   // Load branches on component mount
   createEffect(async () => {
@@ -20,10 +26,28 @@ export function App() {
       setError('');
       const data = await apiService.getBranches();
       setBranches(data.branches || []);
+      
+      // Set default branch to "main" if it exists
+      if (data.branches && data.branches.includes("main")) {
+        setSelectedBranch("main");
+      } else if (data.branches && data.branches.length > 0) {
+        setSelectedBranch(data.branches[0]); // Fallback to first branch
+      }
+      
       setLoading(false);
     } catch (err) {
       setError('Failed to load branches: ' + (err.message || 'Unknown error'));
       setLoading(false);
+    }
+  });
+  
+  // Load output configuration
+  createEffect(async () => {
+    try {
+      const config = await apiService.getOutputConfig();
+      setOutputConfig(config);
+    } catch (err) {
+      console.error('Failed to load output config:', err);
     }
   });
 
@@ -126,6 +150,12 @@ export function App() {
                 <h3 class="h5">Keys that will be included:</h3>
                 <KeyPreview keys={keys()} />
                 
+                <OutputInfo 
+                  dir={outputConfig().outputDir} 
+                  filename={outputConfig().outputFilename}
+                  repoUrl={outputConfig().outputRepoUrl}
+                />
+                
                 <div class="mt-3">
                   <CommitForm 
                     onCommit={handleCommit} 
@@ -138,9 +168,19 @@ export function App() {
 
             <Show when={step() === 'success'}>
               <div class="mt-3">
-                <button class="btn btn-primary" onClick={handleReset}>
-                  Start New Generation
-                </button>
+                <p>Your changes have been committed and pushed successfully.</p>
+                
+                <OutputInfo 
+                  dir={outputConfig().outputDir} 
+                  filename={outputConfig().outputFilename}
+                  repoUrl={outputConfig().outputRepoUrl}
+                />
+                
+                <div class="mt-3">
+                  <button class="btn btn-primary" onClick={handleReset}>
+                    Start New Generation
+                  </button>
+                </div>
               </div>
             </Show>
           </div>

@@ -86,5 +86,29 @@ export const apiService = {
       
       throw new Error(message);
     }
+  },
+  
+  // Get output configuration
+  async getOutputConfig() {
+    try {
+      const response = await api.get('/health');
+      return {
+        outputDir: response.data.output_dir || '/',
+        outputFilename: response.data.output_filename || 'generated.yaml',
+        outputRepoUrl: response.data.output_repo_url || ''
+      };
+    } catch (error) {
+      console.error('Error fetching output config:', error);
+      // Extract the error message from the response
+      const errorMessage = error.response?.data || 
+                          (error.message || 'Unknown error');
+      
+      // If it's a string, use it directly, otherwise try to extract from object
+      const message = typeof errorMessage === 'string' 
+                      ? errorMessage 
+                      : (errorMessage.message || errorMessage.error || JSON.stringify(errorMessage));
+      
+      throw new Error(message);
+    }
   }
 };
