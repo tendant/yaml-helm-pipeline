@@ -1,3 +1,5 @@
+VERSION ?= $(shell git describe --tags --always --dirty)
+
 .PHONY: build run clean dev docker-build docker-run docker-compose-up docker-compose-down
 
 # Build the backend
