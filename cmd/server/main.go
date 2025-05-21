@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/joho/godotenv"
 	"github.com/lei/yaml-helm-pipeline/internal/api"
 	"github.com/lei/yaml-helm-pipeline/internal/git"
 	"github.com/lei/yaml-helm-pipeline/internal/github"
@@ -17,6 +18,11 @@ import (
 )
 
 func main() {
+	// Load environment variables from .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using environment variables")
+	}
+
 	// Check for required environment variables
 	githubToken := os.Getenv("GITHUB_TOKEN")
 	if githubToken == "" {

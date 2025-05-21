@@ -24,9 +24,9 @@ WORKDIR /app
 
 COPY --from=backend-builder /app/yaml-helm-pipeline .
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+COPY .env.example ./.env.example
 
 ENV PORT=8080
-ENV GIN_MODE=release
 
 EXPOSE 8080
 

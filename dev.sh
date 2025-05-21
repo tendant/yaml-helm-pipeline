@@ -1,19 +1,16 @@
 #!/bin/bash
 
-# Check if environment variables are set
-if [ -z "$GITHUB_TOKEN" ]; then
-  echo "Error: GITHUB_TOKEN environment variable is not set"
-  exit 1
-fi
-
-if [ -z "$REPO_OWNER" ]; then
-  echo "Error: REPO_OWNER environment variable is not set"
-  exit 1
-fi
-
-if [ -z "$REPO_NAME" ]; then
-  echo "Error: REPO_NAME environment variable is not set"
-  exit 1
+# Check if .env file exists, if not create from .env.example
+if [ ! -f .env ]; then
+  if [ -f .env.example ]; then
+    echo "No .env file found, creating from .env.example"
+    cp .env.example .env
+    echo "Please edit .env file with your values and run this script again"
+    exit 1
+  else
+    echo "Error: Neither .env nor .env.example file found"
+    exit 1
+  fi
 fi
 
 # Start the backend in the background

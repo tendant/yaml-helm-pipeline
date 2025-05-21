@@ -45,6 +45,8 @@ The application consists of the following components:
 
 ## Environment Variables
 
+The application uses [godotenv](https://github.com/joho/godotenv) to load environment variables from a `.env` file. You can create a `.env` file based on the provided `.env.example` file.
+
 The following environment variables are required:
 
 - `GITHUB_TOKEN`: GitHub Personal Access Token
@@ -61,10 +63,12 @@ The following environment variables are required:
 git clone https://github.com/yourusername/yaml-helm-pipeline.git
 cd yaml-helm-pipeline
 
-# Set up environment variables
-export GITHUB_TOKEN=your_github_token
-export REPO_OWNER=your_repo_owner
-export REPO_NAME=your_repo_name
+# Set up environment variables in .env file
+cp .env.example .env
+# Edit .env file with your values
+# GITHUB_TOKEN=your_github_token
+# REPO_OWNER=your_repo_owner
+# REPO_NAME=your_repo_name
 
 # Run the backend
 go run cmd/server/main.go
@@ -91,11 +95,16 @@ The frontend will be available at http://localhost:3000 and will proxy API reque
 # Build the Docker image
 docker build -t yaml-helm-pipeline .
 
-# Run the container
+# Run the container with environment variables
 docker run -p 8080:8080 \
   -e GITHUB_TOKEN=your_github_token \
   -e REPO_OWNER=your_repo_owner \
   -e REPO_NAME=your_repo_name \
+  yaml-helm-pipeline
+
+# Or run with .env file
+docker run -p 8080:8080 \
+  --env-file .env \
   yaml-helm-pipeline
 ```
 
