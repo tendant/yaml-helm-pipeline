@@ -13,6 +13,15 @@ clean:
 	rm -rf bin/
 	rm -rf frontend/dist/
 
+docker-build:
+	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		--push \
+		--tag wang/yaml-helm-pipeline:$(VERSION) \
+		--tag wang/yaml-helm-pipeline:latest \
+		.
+
+
 # Run in development mode
 dev:
 	./dev.sh
