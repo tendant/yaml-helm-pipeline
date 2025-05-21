@@ -21,7 +21,7 @@ func NewService() *Service {
 }
 
 // TemplateChart renders a Helm chart with the given values
-func (s *Service) TemplateChart(chartPath, valuesPath string) ([]byte, error) {
+func (s *Service) TemplateChart(chartPath string, valuesPaths []string) ([]byte, error) {
 	// Create a temporary directory for the output
 	tempDir, err := ioutil.TempDir("", "helm-template")
 	if err != nil {
@@ -29,8 +29,20 @@ func (s *Service) TemplateChart(chartPath, valuesPath string) ([]byte, error) {
 	}
 	defer os.RemoveAll(tempDir)
 
+	// Build the helm template command
+	args := []string{"template", chartPath, "--output-dir", tempDir}
+
+	// Add each values file
+	for _, valuesPath := range valuesPaths {
+		// Check if the file exists
+		if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
+			return nil, fmt.Errorf("values file not found: %s", valuesPath)
+		}
+		args = append(args, "-f", valuesPath)
+	}
+
 	// Run helm template command
-	cmd := exec.Command("helm", "template", chartPath, "-f", valuesPath, "--output-dir", tempDir)
+	cmd := exec.Command("helm", args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 

@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
@@ -15,6 +17,38 @@ import (
 	"github.com/lei/yaml-helm-pipeline/internal/github"
 	"github.com/lei/yaml-helm-pipeline/internal/helm"
 )
+
+// getValueFilesPaths returns a list of value file paths based on environment variable or default path
+func getValueFilesPaths(localRepoPath string) []string {
+	valueFilesPaths := os.Getenv("VALUE_FILES_PATHS")
+	if valueFilesPaths == "" {
+		// Default path
+		defaultPath := filepath.Join(localRepoPath, "values", "values.yaml")
+		log.Printf("Using default values file path: %s", defaultPath)
+		return []string{defaultPath}
+	}
+
+	// Split by comma
+	paths := strings.Split(valueFilesPaths, ",")
+	var result []string
+
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+
+		// Convert to absolute path if it's relative
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(localRepoPath, path)
+		}
+
+		log.Printf("Adding values file path: %s", path)
+		result = append(result, path)
+	}
+
+	return result
+}
 
 // Handler handles API requests
 type Handler struct {
@@ -103,23 +137,30 @@ func (h *Handler) PreviewChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find the Helm chart and values
-	chartPath := filepath.Join(localRepoPath, "chart")
-	valuesPath := filepath.Join(localRepoPath, "values", "values.yaml")
+	// Use repository root as chart directory
+	chartPath := localRepoPath
 
-	// Check if the files exist
-	if _, err := os.Stat(chartPath); os.IsNotExist(err) {
-		http.Error(w, "Chart directory not found", http.StatusInternalServerError)
+	// Check if Chart.yaml exists
+	if _, err := os.Stat(filepath.Join(chartPath, "Chart.yaml")); os.IsNotExist(err) {
+		http.Error(w, "Chart.yaml not found in repository root", http.StatusInternalServerError)
 		return
 	}
 
-	if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
-		http.Error(w, "Values file not found", http.StatusInternalServerError)
+	// Check if templates directory exists
+	if _, err := os.Stat(filepath.Join(chartPath, "templates")); os.IsNotExist(err) {
+		http.Error(w, "Templates directory not found", http.StatusInternalServerError)
+		return
+	}
+
+	// Get value files paths
+	valuesPaths := getValueFilesPaths(localRepoPath)
+	if len(valuesPaths) == 0 {
+		http.Error(w, "No values files found", http.StatusInternalServerError)
 		return
 	}
 
 	// Generate the YAML using Helm
-	yamlOutput, err := h.helmService.TemplateChart(chartPath, valuesPath)
+	yamlOutput, err := h.helmService.TemplateChart(chartPath, valuesPaths)
 	if err != nil {
 		http.Error(w, "Failed to template chart: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -181,23 +222,30 @@ func (h *Handler) CommitChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find the Helm chart and values
-	chartPath := filepath.Join(localRepoPath, "chart")
-	valuesPath := filepath.Join(localRepoPath, "values", "values.yaml")
+	// Use repository root as chart directory
+	chartPath := localRepoPath
 
-	// Check if the files exist
-	if _, err := os.Stat(chartPath); os.IsNotExist(err) {
-		http.Error(w, "Chart directory not found", http.StatusInternalServerError)
+	// Check if Chart.yaml exists
+	if _, err := os.Stat(filepath.Join(chartPath, "Chart.yaml")); os.IsNotExist(err) {
+		http.Error(w, "Chart.yaml not found in repository root", http.StatusInternalServerError)
 		return
 	}
 
-	if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
-		http.Error(w, "Values file not found", http.StatusInternalServerError)
+	// Check if templates directory exists
+	if _, err := os.Stat(filepath.Join(chartPath, "templates")); os.IsNotExist(err) {
+		http.Error(w, "Templates directory not found", http.StatusInternalServerError)
+		return
+	}
+
+	// Get value files paths
+	valuesPaths := getValueFilesPaths(localRepoPath)
+	if len(valuesPaths) == 0 {
+		http.Error(w, "No values files found", http.StatusInternalServerError)
 		return
 	}
 
 	// Generate the YAML using Helm
-	yamlOutput, err := h.helmService.TemplateChart(chartPath, valuesPath)
+	yamlOutput, err := h.helmService.TemplateChart(chartPath, valuesPaths)
 	if err != nil {
 		http.Error(w, "Failed to template chart: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -236,9 +284,15 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		helmInstalled = false
 	}
 
+	// Check value files configuration
+	valueFilesConfig := os.Getenv("VALUE_FILES_PATHS")
+	valueFilesConfigured := valueFilesConfig != ""
+
 	render.JSON(w, r, map[string]interface{}{
-		"status":               "ok",
-		"github_authenticated": isAuthenticated,
-		"helm_installed":       helmInstalled,
+		"status":                 "ok",
+		"github_authenticated":   isAuthenticated,
+		"helm_installed":         helmInstalled,
+		"value_files_configured": valueFilesConfigured,
+		"value_files_paths":      valueFilesConfig,
 	})
 }

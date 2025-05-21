@@ -15,7 +15,16 @@ export const apiService = {
       return response.data;
     } catch (error) {
       console.error('Error fetching branches:', error);
-      throw error.response?.data || error;
+      // Extract the error message from the response
+      const errorMessage = error.response?.data || 
+                          (error.message || 'Unknown error');
+      
+      // If it's a string, use it directly, otherwise try to extract from object
+      const message = typeof errorMessage === 'string' 
+                      ? errorMessage 
+                      : (errorMessage.message || errorMessage.error || JSON.stringify(errorMessage));
+      
+      throw new Error(message);
     }
   },
 
@@ -26,7 +35,16 @@ export const apiService = {
       return response.data;
     } catch (error) {
       console.error('Error previewing changes:', error);
-      throw error.response?.data || error;
+      // Extract the error message from the response
+      const errorMessage = error.response?.data || 
+                          (error.message || 'Unknown error');
+      
+      // If it's a string, use it directly, otherwise try to extract from object
+      const message = typeof errorMessage === 'string' 
+                      ? errorMessage 
+                      : (errorMessage.message || errorMessage.error || JSON.stringify(errorMessage));
+      
+      throw new Error(message);
     }
   },
 
@@ -37,7 +55,16 @@ export const apiService = {
       return response.data;
     } catch (error) {
       console.error('Error committing changes:', error);
-      throw error.response?.data || error;
+      // Extract the error message from the response
+      const errorMessage = error.response?.data || 
+                          (error.message || 'Unknown error');
+      
+      // If it's a string, use it directly, otherwise try to extract from object
+      const message = typeof errorMessage === 'string' 
+                      ? errorMessage 
+                      : (errorMessage.message || errorMessage.error || JSON.stringify(errorMessage));
+      
+      throw new Error(message);
     }
   },
 
@@ -48,7 +75,16 @@ export const apiService = {
       return response.data;
     } catch (error) {
       console.error('Error checking health:', error);
-      throw error.response?.data || error;
+      // Extract the error message from the response
+      const errorMessage = error.response?.data || 
+                          (error.message || 'Unknown error');
+      
+      // If it's a string, use it directly, otherwise try to extract from object
+      const message = typeof errorMessage === 'string' 
+                      ? errorMessage 
+                      : (errorMessage.message || errorMessage.error || JSON.stringify(errorMessage));
+      
+      throw new Error(message);
     }
   }
 };

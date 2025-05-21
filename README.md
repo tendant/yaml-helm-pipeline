@@ -53,6 +53,8 @@ The following environment variables are required:
 - `REPO_OWNER`: GitHub repository owner
 - `REPO_NAME`: GitHub repository name
 - `PORT` (optional): Port for the server to listen on (default: 8080)
+- `VALUE_FILES_PATHS` (optional): Comma-separated list of value files paths to use for Helm templating. Paths can be relative to the repository root or absolute. If not provided, the default path `values/values.yaml` will be used.
+  - Example: `values/values.yaml,values/secrets.yaml,/absolute/path/to/values.yaml`
 
 ## Development Setup
 
@@ -116,12 +118,13 @@ The repository should have the following structure:
 
 ```
 your-repo/
-├── chart/           # Helm chart directory
-│   ├── templates/   # Helm templates
-│   └── ...
+├── Chart.yaml       # Helm chart metadata
+├── templates/       # Helm templates directory
 └── values/          # Values directory
     └── values.yaml  # Values file
 ```
+
+This follows the standard Helm chart structure, with the repository root serving as the chart directory.
 
 ## Usage
 
