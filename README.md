@@ -52,9 +52,20 @@ The following environment variables are required:
 - `GITHUB_TOKEN`: GitHub Personal Access Token
 - `REPO_OWNER`: GitHub repository owner
 - `REPO_NAME`: GitHub repository name
-- `PORT` (optional): Port for the server to listen on (default: 8080)
+- `PORT` (optional): Port for the server to listen on (default: 4000)
+- `HOST` (optional): Network interface to bind to (default: "0.0.0.0" - all interfaces)
+  - Use "0.0.0.0" to bind to all network interfaces
+  - Use "127.0.0.1" to bind to localhost only (for development)
+  - Use a specific IP address to bind to a particular network interface
 - `VALUE_FILES_PATHS` (optional): Comma-separated list of value files paths to use for Helm templating. Paths can be relative to the repository root or absolute. If not provided, the default path `values/values.yaml` will be used.
   - Example: `values/values.yaml,values/secrets.yaml,/absolute/path/to/values.yaml`
+
+### Health Check Endpoints
+
+The application provides the following health check endpoints:
+
+- `/healthz`: Basic health check that returns 200 OK if the server is running
+- `/healthz/ready`: Readiness check that verifies all dependencies (GitHub API, Helm CLI) are available
 
 ### Output Configuration
 
@@ -105,19 +116,20 @@ The frontend will be available at http://localhost:3000 and will proxy API reque
 docker build -t yaml-helm-pipeline .
 
 # Run the container with environment variables
-docker run -p 8080:8080 \
+docker run -p 4000:4000 \
   -e GITHUB_TOKEN=your_github_token \
   -e REPO_OWNER=your_repo_owner \
   -e REPO_NAME=your_repo_name \
+  -e HOST=0.0.0.0 \
   yaml-helm-pipeline
 
 # Or run with .env file
-docker run -p 8080:8080 \
+docker run -p 4000:4000 \
   --env-file .env \
   yaml-helm-pipeline
 ```
 
-The application will be available at http://localhost:8080.
+The application will be available at http://localhost:4000.
 
 ## Repository Structure
 

@@ -26,8 +26,9 @@ COPY --from=backend-builder /app/yaml-helm-pipeline .
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 COPY .env.example ./.env.example
 
-ENV PORT=8080
+ENV PORT=4000
+ENV HOST=0.0.0.0
 
-EXPOSE 8080
+EXPOSE 4000
 
 CMD ["./yaml-helm-pipeline"]

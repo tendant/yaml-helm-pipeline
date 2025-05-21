@@ -6,11 +6,12 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "4000:4000"
     env_file:
       - .env
     environment:
-      - PORT=8080
+      - PORT=4000
+      - HOST=0.0.0.0
     volumes:
       # Mount .kube directory for Helm to access Kubernetes config if needed
       - ${HOME}/.kube:/root/.kube:ro

@@ -30,7 +30,7 @@ echo "Environment variables set successfully"
 echo "GITHUB_TOKEN: ${GITHUB_TOKEN:0:5}..."
 echo "REPO_OWNER: $REPO_OWNER"
 echo "REPO_NAME: $REPO_NAME"
-echo "PORT: ${PORT:-8080}"
+echo "PORT: ${PORT:-4000}"
 
 # Print instructions
 echo ""

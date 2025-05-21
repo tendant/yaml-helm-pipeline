@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -78,15 +79,47 @@ func main() {
 	// Setup API routes
 	api.SetupRoutes(router, githubService, helmService, gitService)
 
-	// Get port from environment or use default
+	// Add health check endpoints
+	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	router.Get("/healthz/ready", func(w http.ResponseWriter, r *http.Request) {
+		// Check GitHub API connectivity
+		ctx := r.Context()
+		if !githubService.IsAuthenticated(ctx) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("GitHub API not available"))
+			return
+		}
+
+		// Check Helm CLI availability
+		cmd := exec.Command("helm", "version", "--short")
+		if err := cmd.Run(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("Helm CLI not available"))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Ready"))
+	})
+
+	// Get port and host from environment or use defaults
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "4000" // Changed default from 8080 to 4000
+	}
+
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "0.0.0.0" // Default to all interfaces
 	}
 
 	// Start server
-	log.Printf("Server starting on port %s...", port)
-	if err := http.ListenAndServe(":"+port, router); err != nil {
+	log.Printf("Server starting on %s:%s...", host, port)
+	if err := http.ListenAndServe(host+":"+port, router); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
