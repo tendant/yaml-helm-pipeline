@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
 	"github.com/lei/yaml-helm-pipeline/internal/api"
+	"github.com/lei/yaml-helm-pipeline/internal/config"
 	"github.com/lei/yaml-helm-pipeline/internal/git"
 	"github.com/lei/yaml-helm-pipeline/internal/github"
 	"github.com/lei/yaml-helm-pipeline/internal/helm"
@@ -38,6 +39,13 @@ func main() {
 	repoName := os.Getenv("REPO_NAME")
 	if repoName == "" {
 		log.Fatal("REPO_NAME environment variable is required")
+	}
+
+	// Load configuration
+	configPath := os.Getenv("CONFIG_PATH")
+	appConfig, err := config.LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
 	// Initialize services
@@ -77,7 +85,7 @@ func main() {
 	FileServer(router, "/", filesDir)
 
 	// Setup API routes
-	api.SetupRoutes(router, githubService, helmService, gitService)
+	api.SetupRoutes(router, githubService, helmService, gitService, appConfig)
 
 	// Add health check endpoints
 	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {

@@ -43,9 +43,80 @@ The application consists of the following components:
 - Git installed
 - GitHub Personal Access Token with repo scope
 
-## Environment Variables
+## Configuration
 
-The application uses [godotenv](https://github.com/joho/godotenv) to load environment variables from a `.env` file. You can create a `.env` file based on the provided `.env.example` file.
+The application supports multiple configuration methods:
+
+### 1. YAML Configuration File
+
+The application looks for a file named `config.yaml` in the application directory, or at the path specified by the `CONFIG_PATH` environment variable.
+
+Example `config.yaml`:
+
+```yaml
+groups:
+  - name: production
+    values_repos:
+      - owner: owner1
+        repo: repo1
+        path: values/production.yaml
+        branch: main
+      - owner: owner2
+        repo: repo2
+        path: secrets/production.yaml
+        branch: main
+    output_repo:
+      owner: output-owner
+      repo: repo
+      path: k8s/production
+      filename: secrets.yaml
+      branch: main
+  
+  - name: staging
+    values_repos:
+      - owner: owner1
+        repo: repo1
+        path: values/staging.yaml
+        branch: main
+      - owner: owner2
+        repo: repo2
+        path: secrets/staging.yaml
+        branch: main
+    output_repo:
+      owner: output-owner
+      repo: repo
+      path: k8s/staging
+      filename: secrets.yaml
+      branch: staging
+```
+
+### 2. JSON Environment Variable
+
+If no configuration file is found, the application checks for a `CONFIG_GROUPS` environment variable containing a JSON array of configuration groups.
+
+Example:
+```
+CONFIG_GROUPS=[{"name":"production","values_repos":[{"owner":"owner1","repo":"repo1","path":"values/production.yaml","branch":"main"},{"owner":"owner2","repo":"repo2","path":"secrets/production.yaml","branch":"main"}],"output_repo":{"owner":"output-owner","repo":"repo","path":"k8s/production","filename":"secrets.yaml","branch":"main"}},{"name":"staging","values_repos":[{"owner":"owner1","repo":"repo1","path":"values/staging.yaml","branch":"main"},{"owner":"owner2","repo":"repo2","path":"secrets/staging.yaml","branch":"main"}],"output_repo":{"owner":"output-owner","repo":"repo","path":"k8s/staging","filename":"secrets.yaml","branch":"staging"}}]
+```
+
+### 3. Prefixed Environment Variables
+
+If the `CONFIG_GROUPS` variable is not set, the application looks for environment variables with the `CONFIG_GROUP_*` prefix.
+
+Example:
+```
+CONFIG_GROUP_1_NAME=production
+CONFIG_GROUP_1_VALUES_REPO_1=owner1/repo1:values/production.yaml:main
+CONFIG_GROUP_1_VALUES_REPO_2=owner2/repo2:secrets/production.yaml:main
+CONFIG_GROUP_1_OUTPUT_REPO=output-owner/repo:k8s/production/secrets.yaml:main
+
+CONFIG_GROUP_2_NAME=staging
+CONFIG_GROUP_2_VALUES_REPO_1=owner1/repo1:values/staging.yaml:main
+CONFIG_GROUP_2_VALUES_REPO_2=owner2/repo2:secrets/staging.yaml:main
+CONFIG_GROUP_2_OUTPUT_REPO=output-owner/repo:k8s/staging/secrets.yaml:staging
+```
+
+### Basic Environment Variables
 
 The following environment variables are required:
 
@@ -57,8 +128,7 @@ The following environment variables are required:
   - Use "0.0.0.0" to bind to all network interfaces
   - Use "127.0.0.1" to bind to localhost only (for development)
   - Use a specific IP address to bind to a particular network interface
-- `VALUE_FILES_PATHS` (optional): Comma-separated list of value files paths to use for Helm templating. Paths can be relative to the repository root or absolute. If not provided, the default path `values/values.yaml` will be used.
-  - Example: `values/values.yaml,values/secrets.yaml,/absolute/path/to/values.yaml`
+- `CONFIG_PATH` (optional): Path to the configuration file (default: "config.yaml")
 
 ### Health Check Endpoints
 
@@ -66,13 +136,6 @@ The application provides the following health check endpoints:
 
 - `/healthz`: Basic health check that returns 200 OK if the server is running
 - `/healthz/ready`: Readiness check that verifies all dependencies (GitHub API, Helm CLI) are available
-
-### Output Configuration
-
-- `OUTPUT_REPO_URL` (optional): Git URL of the target repository for generated YAML files. If not provided, the source repository will be used.
-- `OUTPUT_REPO_BRANCH` (optional): Branch to use in the target repository. Default: "main"
-- `OUTPUT_DIR` (optional): Directory within the target repository to save files. If not provided, files will be saved at the repository root.
-- `OUTPUT_FILENAME` (optional): Filename for the generated YAML. Default: "generated.yaml"
 
 ## Development Setup
 

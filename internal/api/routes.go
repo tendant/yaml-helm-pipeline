@@ -5,51 +5,214 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
+	"github.com/lei/yaml-helm-pipeline/internal/config"
 	"github.com/lei/yaml-helm-pipeline/internal/extractor"
 	"github.com/lei/yaml-helm-pipeline/internal/git"
 	"github.com/lei/yaml-helm-pipeline/internal/github"
 	"github.com/lei/yaml-helm-pipeline/internal/helm"
 )
 
-// getValueFilesPaths returns a list of value file paths based on environment variable or default path
-func getValueFilesPaths(localRepoPath string) []string {
-	valueFilesPaths := os.Getenv("VALUE_FILES_PATHS")
-	if valueFilesPaths == "" {
-		// Default path
-		defaultPath := filepath.Join(localRepoPath, "values", "values.yaml")
-		log.Printf("Using default values file path: %s", defaultPath)
-		return []string{defaultPath}
+// Helper functions for configuration groups
+
+// findConfigGroup finds a configuration group by name
+func (h *Handler) findConfigGroup(name string) (*config.ConfigGroup, error) {
+	for _, group := range h.config.Groups {
+		if group.Name == name {
+			return &group, nil
+		}
 	}
+	return nil, fmt.Errorf("configuration group not found: %s", name)
+}
 
-	// Split by comma
-	paths := strings.Split(valueFilesPaths, ",")
-	var result []string
+// cloneValuesRepositories clones the values repositories for a configuration group
+func (h *Handler) cloneValuesRepositories(group *config.ConfigGroup) ([]string, error) {
+	var valuesPaths []string
 
-	for _, path := range paths {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			continue
+	for _, valuesRepo := range group.ValuesRepos {
+		// Construct the repository URL
+		repoURL := config.GetRepoURL(valuesRepo.Owner, valuesRepo.Repo)
+
+		// Create a unique path for this values repository
+		valuesRepoPath := filepath.Join(
+			os.TempDir(),
+			fmt.Sprintf("values-%s-%s-%s", valuesRepo.Owner, valuesRepo.Repo, valuesRepo.Branch),
+		)
+
+		// Clone the repository
+		if err := h.gitService.CloneRepository(repoURL, valuesRepoPath, valuesRepo.Branch); err != nil {
+			return nil, fmt.Errorf("failed to clone values repository %s/%s: %w",
+				valuesRepo.Owner, valuesRepo.Repo, err)
 		}
 
-		// Convert to absolute path if it's relative
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(localRepoPath, path)
-		}
-
-		log.Printf("Adding values file path: %s", path)
-		result = append(result, path)
+		// Add the values file path
+		valuesPath := filepath.Join(valuesRepoPath, valuesRepo.Path)
+		valuesPaths = append(valuesPaths, valuesPath)
 	}
 
-	return result
+	return valuesPaths, nil
+}
+
+// cloneOutputRepository clones the output repository for a configuration group
+func (h *Handler) cloneOutputRepository(group *config.ConfigGroup) (string, error) {
+	outputRepo := group.OutputRepo
+
+	// Construct the repository URL
+	repoURL := config.GetRepoURL(outputRepo.Owner, outputRepo.Repo)
+
+	// Create a unique path for this output repository
+	outputRepoPath := filepath.Join(
+		os.TempDir(),
+		fmt.Sprintf("output-%s-%s-%s", outputRepo.Owner, outputRepo.Repo, outputRepo.Branch),
+	)
+
+	// Clone the repository
+	if err := h.gitService.CloneRepository(repoURL, outputRepoPath, outputRepo.Branch); err != nil {
+		return "", fmt.Errorf("failed to clone output repository %s/%s: %w",
+			outputRepo.Owner, outputRepo.Repo, err)
+	}
+
+	return outputRepoPath, nil
+}
+
+// processConfigGroup processes a configuration group
+func (h *Handler) processConfigGroup(
+	ctx context.Context,
+	groupName string,
+	templateRepoBranch string,
+	commitMessage string,
+	previewOnly bool,
+) (map[string]interface{}, error) {
+	// Find the configuration group
+	group, err := h.findConfigGroup(groupName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get template repository information
+	repo, err := h.githubService.GetRepository(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get repository information: %w", err)
+	}
+
+	// Clone the template repository
+	repoURL := *repo.CloneURL
+	repoOwner := *repo.Owner.Login
+	repoName := *repo.Name
+
+	templateRepoPath := h.gitService.GetLocalRepoPath(repoOwner, repoName, templateRepoBranch)
+	if err := h.gitService.CloneRepository(repoURL, templateRepoPath, templateRepoBranch); err != nil {
+		return nil, fmt.Errorf("failed to clone template repository: %w", err)
+	}
+
+	// Use repository root as chart directory
+	chartPath := templateRepoPath
+
+	// Check if Chart.yaml exists
+	if _, err := os.Stat(filepath.Join(chartPath, "Chart.yaml")); os.IsNotExist(err) {
+		return nil, fmt.Errorf("Chart.yaml not found in repository root")
+	}
+
+	// Check if templates directory exists
+	if _, err := os.Stat(filepath.Join(chartPath, "templates")); os.IsNotExist(err) {
+		return nil, fmt.Errorf("templates directory not found")
+	}
+
+	// Clone values repositories and get values files
+	valuesPaths, err := h.cloneValuesRepositories(group)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(valuesPaths) == 0 {
+		return nil, fmt.Errorf("no values files found for group %s", groupName)
+	}
+
+	// Generate the YAML using Helm
+	yamlOutput, err := h.helmService.TemplateChart(chartPath, valuesPaths)
+	if err != nil {
+		return nil, fmt.Errorf("failed to template chart: %w", err)
+	}
+
+	// Extract keys from the YAML
+	keys, err := h.extractorService.ExtractKeys(yamlOutput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract keys: %w", err)
+	}
+
+	result := map[string]interface{}{
+		"keys": keys,
+	}
+
+	// If preview only, return the keys
+	if previewOnly {
+		return result, nil
+	}
+
+	// Clone output repository
+	outputRepoPath, err := h.cloneOutputRepository(group)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create output directory if it doesn't exist
+	outputDir := outputRepoPath
+	if group.OutputRepo.Path != "" {
+		outputDir = filepath.Join(outputRepoPath, group.OutputRepo.Path)
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create output directory: %w", err)
+		}
+	}
+
+	// Get output filename
+	outputFilename := group.OutputRepo.Filename
+	if outputFilename == "" {
+		outputFilename = "generated.yaml"
+	}
+
+	// Check if the file already exists and compare content
+	outputPath := filepath.Join(outputDir, outputFilename)
+	existingContent, err := os.ReadFile(outputPath)
+	fileExists := err == nil
+	contentChanged := true
+
+	if fileExists {
+		contentChanged = !bytes.Equal(existingContent, yamlOutput)
+	}
+
+	// Write the YAML to the output file
+	if err := os.WriteFile(outputPath, yamlOutput, 0644); err != nil {
+		return nil, fmt.Errorf("failed to write YAML file: %w", err)
+	}
+
+	// Prepare commit message
+	finalCommitMessage := commitMessage
+	if commitMessage != "" {
+		finalCommitMessage = fmt.Sprintf("%s (generated from %s/%s branch: %s, group: %s)",
+			commitMessage, repoOwner, repoName, templateRepoBranch, groupName)
+	}
+
+	// Commit and push the changes
+	if err := h.gitService.CommitAndPush(outputRepoPath, finalCommitMessage); err != nil {
+		return nil, fmt.Errorf("failed to commit and push changes: %w", err)
+	}
+
+	// Prepare response message
+	responseMessage := "Changes committed and pushed successfully"
+	if !contentChanged && fileExists {
+		responseMessage = "No changes detected. The generated content is identical to the existing file."
+	}
+
+	result["message"] = responseMessage
+	result["content_changed"] = contentChanged
+
+	return result, nil
 }
 
 // Handler handles API requests
@@ -58,26 +221,29 @@ type Handler struct {
 	helmService      *helm.Service
 	gitService       *git.Service
 	extractorService *extractor.Service
+	config           *config.Config
 }
 
 // NewHandler creates a new API handler
-func NewHandler(githubService *github.Service, helmService *helm.Service, gitService *git.Service, extractorService *extractor.Service) *Handler {
+func NewHandler(githubService *github.Service, helmService *helm.Service, gitService *git.Service, extractorService *extractor.Service, config *config.Config) *Handler {
 	return &Handler{
 		githubService:    githubService,
 		helmService:      helmService,
 		gitService:       gitService,
 		extractorService: extractorService,
+		config:           config,
 	}
 }
 
 // SetupRoutes sets up the API routes
-func SetupRoutes(router chi.Router, githubService *github.Service, helmService *helm.Service, gitService *git.Service) {
+func SetupRoutes(router chi.Router, githubService *github.Service, helmService *helm.Service, gitService *git.Service, config *config.Config) {
 	extractorService := extractor.NewService()
 
-	handler := NewHandler(githubService, helmService, gitService, extractorService)
+	handler := NewHandler(githubService, helmService, gitService, extractorService, config)
 
 	router.Route("/api", func(r chi.Router) {
 		r.Get("/branches", handler.ListBranches)
+		r.Get("/groups", handler.ListConfigGroups)
 		r.Post("/preview", handler.PreviewChanges)
 		r.Post("/commit", handler.CommitChanges)
 		r.Get("/health", handler.HealthCheck)
@@ -102,9 +268,22 @@ func (h *Handler) ListBranches(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ListConfigGroups lists available configuration groups
+func (h *Handler) ListConfigGroups(w http.ResponseWriter, r *http.Request) {
+	var groupNames []string
+	for _, group := range h.config.Groups {
+		groupNames = append(groupNames, group.Name)
+	}
+
+	render.JSON(w, r, map[string]interface{}{
+		"groups": groupNames,
+	})
+}
+
 // PreviewRequest represents a request to preview changes
 type PreviewRequest struct {
-	Branch string `json:"branch"`
+	Branch string   `json:"branch"`
+	Groups []string `json:"groups"`
 }
 
 // PreviewChanges previews the changes that will be made
@@ -120,71 +299,44 @@ func (h *Handler) PreviewChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get repository information
-	repo, err := h.githubService.GetRepository(context.Background())
-	if err != nil {
-		http.Error(w, "Failed to get repository information: "+err.Error(), http.StatusInternalServerError)
+	// If no groups specified, use all groups
+	selectedGroups := req.Groups
+	if len(selectedGroups) == 0 {
+		for _, group := range h.config.Groups {
+			selectedGroups = append(selectedGroups, group.Name)
+		}
+	}
+
+	if len(selectedGroups) == 0 {
+		http.Error(w, "No configuration groups available", http.StatusInternalServerError)
 		return
 	}
 
-	// Clone the repository
-	repoURL := *repo.CloneURL
-	repoOwner := *repo.Owner.Login
-	repoName := *repo.Name
+	// Process each selected group
+	results := make(map[string]interface{})
 
-	localRepoPath := h.gitService.GetLocalRepoPath(repoOwner, repoName, req.Branch)
-
-	if err := h.gitService.CloneRepository(repoURL, localRepoPath, req.Branch); err != nil {
-		http.Error(w, "Failed to clone repository: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Use repository root as chart directory
-	chartPath := localRepoPath
-
-	// Check if Chart.yaml exists
-	if _, err := os.Stat(filepath.Join(chartPath, "Chart.yaml")); os.IsNotExist(err) {
-		http.Error(w, "Chart.yaml not found in repository root", http.StatusInternalServerError)
-		return
-	}
-
-	// Check if templates directory exists
-	if _, err := os.Stat(filepath.Join(chartPath, "templates")); os.IsNotExist(err) {
-		http.Error(w, "Templates directory not found", http.StatusInternalServerError)
-		return
-	}
-
-	// Get value files paths
-	valuesPaths := getValueFilesPaths(localRepoPath)
-	if len(valuesPaths) == 0 {
-		http.Error(w, "No values files found", http.StatusInternalServerError)
-		return
-	}
-
-	// Generate the YAML using Helm
-	yamlOutput, err := h.helmService.TemplateChart(chartPath, valuesPaths)
-	if err != nil {
-		http.Error(w, "Failed to template chart: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Extract keys from the YAML
-	keys, err := h.extractorService.ExtractKeys(yamlOutput)
-	if err != nil {
-		http.Error(w, "Failed to extract keys: "+err.Error(), http.StatusInternalServerError)
-		return
+	for _, groupName := range selectedGroups {
+		result, err := h.processConfigGroup(r.Context(), groupName, req.Branch, "", true)
+		if err != nil {
+			results[groupName] = map[string]interface{}{
+				"error": err.Error(),
+			}
+		} else {
+			results[groupName] = result
+		}
 	}
 
 	render.JSON(w, r, map[string]interface{}{
-		"keys":   keys,
-		"branch": req.Branch,
+		"results": results,
+		"branch":  req.Branch,
 	})
 }
 
 // CommitRequest represents a request to commit changes
 type CommitRequest struct {
-	Branch  string `json:"branch"`
-	Message string `json:"message"`
+	Branch  string   `json:"branch"`
+	Message string   `json:"message"`
+	Groups  []string `json:"groups"`
 }
 
 // CommitChanges commits the changes to the repository
@@ -205,117 +357,35 @@ func (h *Handler) CommitChanges(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get repository information
-	repo, err := h.githubService.GetRepository(context.Background())
-	if err != nil {
-		http.Error(w, "Failed to get repository information: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Clone the repository
-	repoURL := *repo.CloneURL
-	repoOwner := *repo.Owner.Login
-	repoName := *repo.Name
-
-	localRepoPath := h.gitService.GetLocalRepoPath(repoOwner, repoName, req.Branch)
-
-	if err := h.gitService.CloneRepository(repoURL, localRepoPath, req.Branch); err != nil {
-		http.Error(w, "Failed to clone repository: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Use repository root as chart directory
-	chartPath := localRepoPath
-
-	// Check if Chart.yaml exists
-	if _, err := os.Stat(filepath.Join(chartPath, "Chart.yaml")); os.IsNotExist(err) {
-		http.Error(w, "Chart.yaml not found in repository root", http.StatusInternalServerError)
-		return
-	}
-
-	// Check if templates directory exists
-	if _, err := os.Stat(filepath.Join(chartPath, "templates")); os.IsNotExist(err) {
-		http.Error(w, "Templates directory not found", http.StatusInternalServerError)
-		return
-	}
-
-	// Get value files paths
-	valuesPaths := getValueFilesPaths(localRepoPath)
-	if len(valuesPaths) == 0 {
-		http.Error(w, "No values files found", http.StatusInternalServerError)
-		return
-	}
-
-	// Generate the YAML using Helm
-	yamlOutput, err := h.helmService.TemplateChart(chartPath, valuesPaths)
-	if err != nil {
-		http.Error(w, "Failed to template chart: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Determine output repository and path
-	outputRepoPath, _, err := h.gitService.GetOutputRepoPath(localRepoPath)
-	if err != nil {
-		http.Error(w, "Failed to prepare output repository: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Get output directory within the repository
-	outputDirEnv := os.Getenv("OUTPUT_DIR")
-	outputDir := outputRepoPath
-	if outputDirEnv != "" {
-		outputDir = filepath.Join(outputRepoPath, outputDirEnv)
-		// Create directory if it doesn't exist
-		if err := os.MkdirAll(outputDir, 0755); err != nil {
-			http.Error(w, "Failed to create output directory: "+err.Error(), http.StatusInternalServerError)
-			return
+	// If no groups specified, use all groups
+	selectedGroups := req.Groups
+	if len(selectedGroups) == 0 {
+		for _, group := range h.config.Groups {
+			selectedGroups = append(selectedGroups, group.Name)
 		}
 	}
 
-	// Get output filename
-	outputFilename := os.Getenv("OUTPUT_FILENAME")
-	if outputFilename == "" {
-		outputFilename = "generated.yaml"
-	}
-
-	// Check if the file already exists and compare content
-	existingContent, err := os.ReadFile(filepath.Join(outputDir, outputFilename))
-	fileExists := err == nil
-	contentChanged := true
-
-	if fileExists {
-		contentChanged = !bytes.Equal(existingContent, yamlOutput)
-	}
-
-	// Write the YAML to the output file
-	outputPath := filepath.Join(outputDir, outputFilename)
-	if err := os.WriteFile(outputPath, yamlOutput, 0644); err != nil {
-		http.Error(w, "Failed to write YAML file: "+err.Error(), http.StatusInternalServerError)
+	if len(selectedGroups) == 0 {
+		http.Error(w, "No configuration groups available", http.StatusInternalServerError)
 		return
 	}
 
-	// Prepare commit message
-	commitMessage := req.Message
-	if os.Getenv("OUTPUT_REPO_URL") != "" {
-		commitMessage = fmt.Sprintf("%s (generated from %s/%s branch: %s)",
-			req.Message, *repo.Owner.Login, *repo.Name, req.Branch)
-	}
+	// Process each selected group
+	results := make(map[string]interface{})
 
-	// Commit and push the changes
-	if err := h.gitService.CommitAndPush(outputRepoPath, commitMessage); err != nil {
-		http.Error(w, "Failed to commit and push changes: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Prepare response message
-	responseMessage := "Changes committed and pushed successfully"
-	if !contentChanged && fileExists {
-		responseMessage = "No changes detected. The generated content is identical to the existing file."
+	for _, groupName := range selectedGroups {
+		result, err := h.processConfigGroup(r.Context(), groupName, req.Branch, req.Message, false)
+		if err != nil {
+			results[groupName] = map[string]interface{}{
+				"error": err.Error(),
+			}
+		} else {
+			results[groupName] = result
+		}
 	}
 
 	render.JSON(w, r, map[string]interface{}{
-		"success": true,
-		"message": responseMessage,
+		"results": results,
 		"branch":  req.Branch,
 	})
 }

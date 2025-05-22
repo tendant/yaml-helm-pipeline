@@ -1,0 +1,47 @@
+groups:
+  - name: production
+    values_repos:
+      - owner: lei
+        repo: helm-values-production
+        path: values/production.yaml
+        branch: main
+      - owner: lei
+        repo: helm-secrets-production
+        path: secrets/production.yaml
+        branch: main
+    output_repo:
+      owner: lei
+      repo: k8s-manifests
+      path: production
+      filename: secrets.yaml
+      branch: main
+
+  - name: staging
+    values_repos:
+      - owner: lei
+        repo: helm-values-staging
+        path: values/staging.yaml
+        branch: main
+      - owner: lei
+        repo: helm-secrets-staging
+        path: secrets/staging.yaml
+        branch: main
+    output_repo:
+      owner: lei
+      repo: k8s-manifests
+      path: staging
+      filename: secrets.yaml
+      branch: staging
+
+  - name: development
+    values_repos:
+      - owner: lei
+        repo: helm-values-dev
+        path: values/dev.yaml
+        branch: main
+    output_repo:
+      owner: lei
+      repo: k8s-manifests
+      path: development
+      filename: secrets.yaml
+      branch: dev

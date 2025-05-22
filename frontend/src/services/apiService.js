@@ -27,11 +27,31 @@ export const apiService = {
       throw new Error(message);
     }
   },
-
-  // Preview changes for a branch
-  async previewChanges(branch) {
+  
+  // Get list of configuration groups
+  async getConfigGroups() {
     try {
-      const response = await api.post('/preview', { branch });
+      const response = await api.get('/groups');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching configuration groups:', error);
+      // Extract the error message from the response
+      const errorMessage = error.response?.data || 
+                          (error.message || 'Unknown error');
+      
+      // If it's a string, use it directly, otherwise try to extract from object
+      const message = typeof errorMessage === 'string' 
+                      ? errorMessage 
+                      : (errorMessage.message || errorMessage.error || JSON.stringify(errorMessage));
+      
+      throw new Error(message);
+    }
+  },
+
+  // Preview changes for a branch and groups
+  async previewChanges(branch, groups = []) {
+    try {
+      const response = await api.post('/preview', { branch, groups });
       return response.data;
     } catch (error) {
       console.error('Error previewing changes:', error);
@@ -48,10 +68,10 @@ export const apiService = {
     }
   },
 
-  // Commit changes to a branch
-  async commitChanges(branch, message) {
+  // Commit changes to a branch with groups
+  async commitChanges(branch, message, groups = []) {
     try {
-      const response = await api.post('/commit', { branch, message });
+      const response = await api.post('/commit', { branch, message, groups });
       return response.data;
     } catch (error) {
       console.error('Error committing changes:', error);
