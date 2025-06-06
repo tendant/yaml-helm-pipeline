@@ -140,6 +140,54 @@ func (h *Handler) processConfigGroup(
 		return nil, fmt.Errorf("failed to template chart: %w", err)
 	}
 
+	// If preview only, compare with existing content
+	if previewOnly {
+		// Get output filename and path for comparison
+		outputFilename := group.OutputRepo.Filename
+		if outputFilename == "" {
+			outputFilename = "generated.yaml"
+		}
+
+		// Clone output repository to get existing content
+		outputRepoPath, err := h.cloneOutputRepository(group)
+		if err != nil {
+			return nil, err
+		}
+
+		// Create output directory path
+		outputDir := outputRepoPath
+		if group.OutputRepo.Path != "" {
+			outputDir = filepath.Join(outputRepoPath, group.OutputRepo.Path)
+		}
+
+		outputPath := filepath.Join(outputDir, outputFilename)
+		existingContent, err := os.ReadFile(outputPath)
+		
+		var changes map[string]interface{}
+		if err != nil {
+			// File doesn't exist, extract keys from new content only
+			keys, err := h.extractorService.ExtractKeys(yamlOutput)
+			if err != nil {
+				return nil, fmt.Errorf("failed to extract keys: %w", err)
+			}
+			changes = map[string]interface{}{
+				"all_new": true,
+				"keys":    keys,
+			}
+		} else {
+			// File exists, compare old vs new
+			changes, err = h.extractorService.CompareYAML(existingContent, yamlOutput)
+			if err != nil {
+				return nil, fmt.Errorf("failed to compare YAML: %w", err)
+			}
+		}
+
+		result := map[string]interface{}{
+			"changes": changes,
+		}
+		return result, nil
+	}
+
 	// Extract keys from the YAML
 	keys, err := h.extractorService.ExtractKeys(yamlOutput)
 	if err != nil {
@@ -148,11 +196,6 @@ func (h *Handler) processConfigGroup(
 
 	result := map[string]interface{}{
 		"keys": keys,
-	}
-
-	// If preview only, return the keys
-	if previewOnly {
-		return result, nil
 	}
 
 	// Clone output repository
